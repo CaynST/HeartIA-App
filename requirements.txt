@@ -1,6 +1,6 @@
-streamlit
-streamlit-autorefresh
-pandas
-numpy
-joblib
-twilio
+streamlit==1.35.0
+streamlit-autorefresh==0.0.2
+pandas==2.2.2
+numpy==1.26.4
+joblib==1.4.2
+twilio==9.0.2
