@@ -4,3 +4,4 @@ lightgbm
 pandas
 numpy
 scikit-learn
+streamlit_autorefresh
