@@ -6,10 +6,17 @@ import time
 import joblib
 import random
 import threading
+import os
 from twilio.rest import Client
 
 # Carga modelo (ajusta ruta)
 modelo = joblib.load("modelo_ia_lightgbm.pkl")
+
+
+
+account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+client = Client(account_sid, auth_token)
 
 st.set_page_config(page_title="Monitor Cardiaco", layout="centered")
 
