@@ -30,9 +30,6 @@ def simular_presion(ap_hi, ap_lo):
     return ap_hi, ap_lo
 
 def hacer_llamada(from_number, to_number):
-    # Llena con tus credenciales reales de Twilio
-    account_sid = "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXX"  # Reemplaza con tu Account SID
-    auth_token = "your_auth_token"                 # Reemplaza con tu Auth Token
     client = Client(account_sid, auth_token)
 
     llamada = client.calls.create(
