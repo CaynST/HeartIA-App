@@ -9,13 +9,31 @@ import threading
 import os
 from twilio.rest import Client
 
-# Carga modelo (ajusta ruta)
+# --- Inicialización segura de estado ---
+session_defaults = {
+    "modo_emergencia": False,
+    "form_data": None,
+    "user_phone": "",
+    "emergency_phone": "",
+    "ap_hi": 100,
+    "ap_lo": 70,
+    "ritmo_cardiaco": 75,
+    "hist_ritmo": []
+}
+
+for key, default_value in session_defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_value
+
+# --- Cargar modelo IA ---
 modelo = joblib.load("modelo_ia_lightgbm.pkl")
 
+# --- Twilio ---
 account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 client = Client(account_sid, auth_token)
 
+# --- Configuración de página ---
 st.set_page_config(page_title="Monitor Cardiaco", layout="centered")
 
 if "modo_emergencia" not in st.session_state:
