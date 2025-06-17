@@ -5,11 +5,10 @@ import numpy as np
 import time
 import joblib
 import random
-import threading
 import os
 from twilio.rest import Client
 
-# --- Inicialización segura de estado ---
+# --- Inicialización segura del estado ---
 session_defaults = {
     "modo_emergencia": False,
     "form_data": None,
@@ -20,10 +19,9 @@ session_defaults = {
     "ritmo_cardiaco": 75,
     "hist_ritmo": []
 }
-
-for key, default_value in session_defaults.items():
+for key, default in session_defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default_value
+        st.session_state[key] = default
 
 # --- Cargar modelo IA ---
 modelo = joblib.load("modelo_ia_lightgbm.pkl")
@@ -33,11 +31,7 @@ account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 client = Client(account_sid, auth_token)
 
-# --- Configuración de página ---
 st.set_page_config(page_title="Monitor Cardiaco", layout="centered")
-
-if "modo_emergencia" not in st.session_state:
-    st.session_state.modo_emergencia = False
 
 # --- Funciones ---
 def simular_presion(ap_hi, ap_lo):
@@ -45,19 +39,16 @@ def simular_presion(ap_hi, ap_lo):
     ap_lo = max(60, min(100, int(ap_lo + random.randint(-3, 3))))
     return ap_hi, ap_lo
 
-def hacer_llamada(from_number, to_number):
-    client = Client(account_sid, auth_token)
+def simular_ritmo_cardiaco():
+    return random.randint(90, 100)
 
+def hacer_llamada(from_number, to_number):
     llamada = client.calls.create(
         twiml='<Response><Say voice="alice">Se ha detectado una emergencia cardíaca. Por favor contacte al usuario de inmediato.</Say></Response>',
         to=to_number,
         from_=from_number
     )
-
     return llamada.sid
-
-def simular_ritmo_cardiaco():
-    return random.randint(90, 100)
 
 def clasificar_riesgo(prob):
     if prob < 0.5:
@@ -77,15 +68,12 @@ def clasificar_presion(ap_hi, ap_lo):
     else:
         return "Presión normal", "green"
 
-# --- Formulario Inicio ---
-if "form_data" not in st.session_state:
-    st.session_state.form_data = None
-
+# --- Navegación ---
 with st.sidebar:
     st.header("Configuración")
     pagina = st.radio("Navegación", ["Inicio", "Contacto de emergencia", "Monitorización"])
 
-# Página Inicio: Formulario
+# --- Página Inicio ---
 if pagina == "Inicio":
     st.title("Registro inicial del usuario")
     with st.form("form_usuario"):
@@ -96,7 +84,6 @@ if pagina == "Inicio":
         smoke = st.selectbox("¿Fuma?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
         alco = st.selectbox("¿Consume alcohol?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
         active = st.selectbox("¿Es activo físicamente?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
-
         submitted = st.form_submit_button("Guardar datos")
         if submitted:
             st.session_state.form_data = {
@@ -110,7 +97,7 @@ if pagina == "Inicio":
             }
             st.success("Datos guardados correctamente")
 
-# Página Contacto emergencia
+# --- Página Contacto de Emergencia ---
 elif pagina == "Contacto de emergencia":
     st.title("Configuración de contacto de emergencia")
     with st.form("form_contacto"):
@@ -122,22 +109,16 @@ elif pagina == "Contacto de emergencia":
             st.session_state.emergency_phone = emergency_phone
             st.success("Números guardados")
 
-# Página Monitorización
+# --- Página Monitorización ---
 elif pagina == "Monitorización":
     st.title("Monitorización cardíaca en tiempo real")
 
-    if not st.session_state.get("form_data", None):
+    if not st.session_state.form_data:
         st.warning("Por favor completa el formulario inicial primero.")
     else:
         datos = st.session_state.form_data
 
-        if "ap_hi" not in st.session_state:
-            st.session_state.ap_hi = 100
-        if "ap_lo" not in st.session_state:
-            st.session_state.ap_lo = 70
-        if "ritmo_cardiaco" not in st.session_state:
-            st.session_state.ritmo_cardiaco = 75
-
+        # Simulación de estados
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Simular Riesgo Medio"):
@@ -156,14 +137,14 @@ elif pagina == "Monitorización":
                 st.session_state.ritmo_cardiaco = 130
                 st.session_state.modo_emergencia = True
 
-        with st.container():
-            if st.button("Normalizar Signos Vitales"):
-                st.session_state.ap_hi = 110
-                st.session_state.ap_lo = 70
-                st.session_state.ritmo_cardiaco = 75
-                st.success("Signos vitales normalizados")
-                st.session_state.modo_emergencia = False
+        if st.button("Normalizar Signos Vitales"):
+            st.session_state.ap_hi = 110
+            st.session_state.ap_lo = 70
+            st.session_state.ritmo_cardiaco = 75
+            st.session_state.modo_emergencia = False
+            st.success("Signos vitales normalizados")
 
+        # Simulación en tiempo real
         ap_hi, ap_lo = simular_presion(st.session_state.ap_hi, st.session_state.ap_lo)
         ritmo = simular_ritmo_cardiaco()
 
@@ -171,6 +152,7 @@ elif pagina == "Monitorización":
         st.session_state.ap_lo = ap_lo
         st.session_state.ritmo_cardiaco = ritmo
 
+        # Preparar datos para el modelo
         df = pd.DataFrame([{
             "age": datos["age"],
             "gender": datos["gender"],
@@ -192,21 +174,17 @@ elif pagina == "Monitorización":
 
         st.metric("Ritmo cardíaco (bpm)", ritmo)
 
-        # --- Corregido: Manejo robusto de hist_ritmo ---
-        hist = st.session_state.get("hist_ritmo", [])
-        hist.append(ritmo)
-        if len(hist) > 20:
-            hist.pop(0)
-        st.session_state.hist_ritmo = hist
+        # Guardar historial y graficar
+        st.session_state.hist_ritmo.append(ritmo)
+        if len(st.session_state.hist_ritmo) > 20:
+            st.session_state.hist_ritmo.pop(0)
+        st.line_chart(st.session_state.hist_ritmo)
 
-        st.line_chart(hist)
-
+        # Modo emergencia
         if st.session_state.modo_emergencia:
             st.error("⚠️ ¡Modo de emergencia activado!")
-
-            user = st.session_state.get("user_phone", "No definido")
-            contacto = st.session_state.get("emergency_phone", "No definido")
-
+            user = st.session_state.user_phone or "No definido"
+            contacto = st.session_state.emergency_phone or "No definido"
             st.markdown(f"📞 Llamando desde **{user}** a contacto de emergencia **{contacto}**...")
 
             try:
@@ -215,5 +193,6 @@ elif pagina == "Monitorización":
             except Exception as e:
                 st.error(f"❌ No se pudo realizar la llamada: {e}")
 
+        # Refrescar cada segundo
         time.sleep(1)
         st_autorefresh(interval=1000, key="auto-refresh")
