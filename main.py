@@ -8,11 +8,21 @@ import random
 import threading
 import os
 from twilio.rest import Client
+from sklearn.tree import DecisionTreeClassifier
+import pickle
 
-# Carga modelo (ajusta ruta)
+# Carga modelo principal (LightGBM)
 modelo = joblib.load("modelo_ia_lightgbm.pkl")
 
+# Carga modelo alternativo (árbol de decisión)
+if os.path.exists("modelo_arbol.pkl"):
+    modelo_arbol = pickle.load(open("modelo_arbol.pkl", "rb"))
+else:
+    modelo_arbol = None
 
+# Historial de predicciones
+if "historial_predicciones" not in st.session_state:
+    st.session_state.historial_predicciones = []
 
 account_sid = os.getenv("TWILIO_ACCOUNT_SID")
 auth_token = os.getenv("TWILIO_AUTH_TOKEN")
@@ -30,16 +40,12 @@ def simular_presion(ap_hi, ap_lo):
     return ap_hi, ap_lo
 
 def hacer_llamada(from_number, to_number):
-    client = Client(account_sid, auth_token)
-
     llamada = client.calls.create(
         twiml='<Response><Say voice="alice">Se ha detectado una emergencia cardíaca. Por favor contacte al usuario de inmediato.</Say></Response>',
         to=to_number,
         from_=from_number
     )
-
     return llamada.sid
-
 
 def simular_ritmo_cardiaco():
     return random.randint(90, 100)
@@ -68,9 +74,8 @@ if "form_data" not in st.session_state:
 
 with st.sidebar:
     st.header("Configuración")
-    pagina = st.radio("Navegación", ["Inicio", "Contacto de emergencia", "Monitorización"])
+    pagina = st.radio("Navegación", ["Inicio", "Contacto de emergencia", "Monitorización", "Historial"])
 
-# Página Inicio: Formulario
 if pagina == "Inicio":
     st.title("Registro inicial del usuario")
     with st.form("form_usuario"):
@@ -81,11 +86,10 @@ if pagina == "Inicio":
         smoke = st.selectbox("¿Fuma?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
         alco = st.selectbox("¿Consume alcohol?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
         active = st.selectbox("¿Es activo físicamente?", [0, 1], format_func=lambda x: "No" if x == 0 else "Sí")
-        
         submitted = st.form_submit_button("Guardar datos")
         if submitted:
             st.session_state.form_data = {
-                "age": int(age * 365),  # convertir años a días
+                "age": int(age * 365),
                 "gender": gender,
                 "height": height,
                 "weight": weight,
@@ -95,7 +99,6 @@ if pagina == "Inicio":
             }
             st.success("Datos guardados correctamente")
 
-# Página Contacto emergencia
 elif pagina == "Contacto de emergencia":
     st.title("Configuración de contacto de emergencia")
     with st.form("form_contacto"):
@@ -107,16 +110,14 @@ elif pagina == "Contacto de emergencia":
             st.session_state.emergency_phone = emergency_phone
             st.success("Números guardados")
 
-# Página Monitorización
 elif pagina == "Monitorización":
     st.title("Monitorización cardíaca en tiempo real")
-    
-    if not st.session_state.get("form_data", None):
+
+    if not st.session_state.get("form_data"):
         st.warning("Por favor completa el formulario inicial primero.")
     else:
         datos = st.session_state.form_data
 
-        # Variables iniciales
         if "ap_hi" not in st.session_state:
             st.session_state.ap_hi = 100
         if "ap_lo" not in st.session_state:
@@ -124,7 +125,6 @@ elif pagina == "Monitorización":
         if "ritmo_cardiaco" not in st.session_state:
             st.session_state.ritmo_cardiaco = 75
 
-        # Botones para simular riesgo
         col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("Simular Riesgo Medio"):
@@ -142,53 +142,47 @@ elif pagina == "Monitorización":
                 st.session_state.ap_lo = 110
                 st.session_state.ritmo_cardiaco = 130
                 st.session_state.modo_emergencia = True
-        with st.container():
-            if st.button("Normalizar Signos Vitales"):
-                st.session_state.ap_hi = 110
-                st.session_state.ap_lo = 70
-                st.session_state.ritmo_cardiaco = 75
-                st.success("Signos vitales normalizados")
-                st.session_state.modo_emergencia = False
 
+        if st.button("Normalizar Signos Vitales"):
+            st.session_state.ap_hi = 110
+            st.session_state.ap_lo = 70
+            st.session_state.ritmo_cardiaco = 75
+            st.success("Signos vitales normalizados")
+            st.session_state.modo_emergencia = False
 
-        # Simular presión y ritmo con pequeña variación
         ap_hi, ap_lo = simular_presion(st.session_state.ap_hi, st.session_state.ap_lo)
         ritmo = simular_ritmo_cardiaco()
-
         st.session_state.ap_hi = ap_hi
         st.session_state.ap_lo = ap_lo
         st.session_state.ritmo_cardiaco = ritmo
 
-        # Preparar datos para modelo
         df = pd.DataFrame([{
-        "age": datos["age"],
-        "gender": datos["gender"],
-        "height": datos["height"],
-        "weight": datos["weight"],
-        "ap_hi": st.session_state.ap_hi,
-        "ap_lo": st.session_state.ap_lo,
-        "smoke": datos["smoke"],
-        "alco": datos["alco"],
-        "active": datos["active"]
-            }])
+            "age": datos["age"],
+            "gender": datos["gender"],
+            "height": datos["height"],
+            "weight": datos["weight"],
+            "ap_hi": st.session_state.ap_hi,
+            "ap_lo": st.session_state.ap_lo,
+            "smoke": datos["smoke"],
+            "alco": datos["alco"],
+            "active": datos["active"]
+        }])
 
-        # Obtener probabilidad riesgo
-        riesgo_prob = modelo.predict_proba(df)[:, 1][0]
+        modelo_actual = modelo if st.radio("Modelo de predicción", ["LightGBM", "Árbol de decisión"], index=0) == "LightGBM" else modelo_arbol
 
-        # Mostrar estado riesgo
+        if modelo_actual is not None:
+            riesgo_prob = modelo_actual.predict_proba(df)[:, 1][0]
+        else:
+            riesgo_prob = 0
+            st.warning("Modelo de árbol de decisión no disponible")
+
         estado_riesgo, color_riesgo = clasificar_riesgo(riesgo_prob)
         st.markdown(f"<h2 style='color:{color_riesgo}'>Riesgo: {estado_riesgo} ({riesgo_prob*100:.1f}%)</h2>", unsafe_allow_html=True)
 
-        # Mostrar estado presión
         estado_presion, color_presion = clasificar_presion(ap_hi, ap_lo)
         st.markdown(f"<h3 style='color:{color_presion}'>Presión arterial: {estado_presion} ({ap_hi}/{ap_lo} mmHg)</h3>", unsafe_allow_html=True)
 
-        # Mostrar ritmo cardíaco
         st.metric("Ritmo cardíaco (bpm)", ritmo)
-
-        # Gráfica de ritmo cardíaco (últimos 20 segundos)
-        if "hist_ritmo" not in st.session_state:
-            st.session_state.hist_ritmo = []
 
         st.session_state.hist_ritmo.append(ritmo)
         if len(st.session_state.hist_ritmo) > 20:
@@ -196,22 +190,30 @@ elif pagina == "Monitorización":
 
         st.line_chart(st.session_state.hist_ritmo)
 
+        st.session_state.historial_predicciones.append({
+            "probabilidad": riesgo_prob,
+            "estado": estado_riesgo,
+            "presion": f"{ap_hi}/{ap_lo}",
+            "ritmo": ritmo
+        })
+
         if st.session_state.modo_emergencia:
             st.error("⚠️ ¡Modo de emergencia activado!")
-
             user = st.session_state.get("user_phone", "No definido")
             contacto = st.session_state.get("emergency_phone", "No definido")
-
             st.markdown(f"📞 Llamando desde **{user}** a contacto de emergencia **{contacto}**...")
-
             try:
                 sid = hacer_llamada(from_number=user, to_number=contacto)
                 st.success(f"✅ Llamada iniciada con SID: {sid}")
             except Exception as e:
                 st.error(f"❌ No se pudo realizar la llamada: {e}")
-           
 
-
-        # Esperar 1 segundo para refrescar
         time.sleep(1)
         st_autorefresh(interval=1000, key="auto-refresh")
+
+elif pagina == "Historial":
+    st.title("Historial de predicciones")
+    if st.session_state.historial_predicciones:
+        st.dataframe(pd.DataFrame(st.session_state.historial_predicciones))
+    else:
+        st.info("No hay predicciones registradas aún.")
